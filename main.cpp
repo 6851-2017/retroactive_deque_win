@@ -41,22 +41,23 @@ using namespace std;
 //ofstream fout(".out");
 
 #define maxB 8
-///NODE of A-B Tree
+///b degree of A-B Tree
 
-
-#define NUM_TESTS 1000000
-#define AUTO_TEST 0
+#define NUM_TESTS 100000
+#define AUTO_TEST 1
+#define random_seed 1
 #define print_queries (1-AUTO_TEST)
 #define max_n 20
-#define max_constant 10
-#define max_time max_n*max_n
+#define max_constant max_n*2
+#define max_time max_n*10
 #define print_wrong_input 1
 #define print_input 0
-#define deep_print 0
+#define deep_print_query print_queries
+#define deep_print print_queries
 
 string int_to_string(int n)
 {
-    if(n == -inf)
+    if(n <= -inf/2 || n >=inf/2)
     {
         return "/";
     }
@@ -64,6 +65,8 @@ string int_to_string(int n)
     {
         return "0";
     }
+    int tmp_n = n;
+    n = abs(n);
     string ret;
     while(n>0)
     {
@@ -71,27 +74,59 @@ string int_to_string(int n)
         n/=10;
     }
     rev_v(ret);
-    return ret;
+    if(tmp_n<0)
+    {
+        return "-"+ret;
+    }
+    else
+    {
+        return ret;
+    }
 }
 
 class one_side
 {
 public:
+    int val;
+
+    int sum;
+
+    int low;
+    int high;
+
     int removes;
     int adds;
-    int val;
-    int cut;
-    int max_adds;
-    int max_removes;
 
+    int cut;
+
+    int prefix;
+    int lazy_push;
+
+    int prefix_delta;
+    int max_prefix;
+    int min_prefix;
+    int hidden;
+    int hidden_depth;
+    int first_drop;
+    int last_inc;
     void init()
     {
+        sum = 0;
+        low = 0;
+        high = 0;
+        val = -inf;
         removes = 0;
         adds = 0;
-        max_adds = 0;
-        val = -inf;
         cut = 0;
-        max_removes = 0;
+        prefix = 0;
+        lazy_push = 0;
+        prefix_delta = 0;
+        max_prefix = 0;
+        min_prefix = 0;
+        hidden = 0;
+        hidden_depth = 0;
+        first_drop = inf;
+        last_inc = -inf;
     }
     one_side()
     {
@@ -99,12 +134,21 @@ public:
     }
     one_side(one_side* to_copy)
     {
+        init();
+        sum = to_copy->sum;
+        low = to_copy->low;
+        high = to_copy->high;
+        val = to_copy->val;
         removes = to_copy->removes;
         adds = to_copy->adds;
-        val = to_copy->val;
-        max_adds = to_copy->max_adds;
         cut = to_copy->cut;
-        max_removes = to_copy->max_removes;
+        prefix = to_copy->prefix;
+        lazy_push = to_copy->lazy_push;
+        prefix_delta = to_copy->prefix_delta;
+        hidden = to_copy->hidden;
+        first_drop = to_copy->first_drop;
+        last_inc = to_copy->last_inc;
+        hidden_depth = to_copy->hidden_depth;
     }
     bool is_pop(int type)
     {
@@ -116,17 +160,28 @@ public:
     }
     void update(int type, int _val)
     {
+        init();
         assert(0<=type && type <=4);
         if(is_pop(type))
         {
+            sum = -1;
+            low = -1;
             removes = 1;
-            max_removes = 1;
+            prefix = -1;
+            max_prefix = -1;
+            min_prefix = -1;
+            first_drop = -1;
         }
         else if(is_push(type))
         {
-            adds = 1;
-            max_adds = 1;
+            sum = 1;
+            high = 1;
             val = _val;
+            adds = 1;
+            prefix = 1;
+            max_prefix = 1;
+            min_prefix = 1;
+            last_inc = 1;
         }
         else
         {
@@ -135,91 +190,154 @@ public:
     }
     void merge(one_side *right_operand)
     {
-        max_removes = max(max_removes, removes-adds+right_operand->max_removes);
-        max_adds = max(max_adds, max(0, adds-right_operand->removes)+right_operand->max_adds);
-        removes = removes-min(0, adds-right_operand->removes);
-        adds = max(0, adds-right_operand->removes) + right_operand->adds;
-        if(adds>0)
+        assert(0);
+        assert(right_operand->cut == 0);
+        high = max(high, sum+right_operand->high);
+        low = min(low, sum+right_operand->low);
+        hidden += right_operand->hidden + min(right_operand->removes, adds);
+        if(min(right_operand->removes, adds)>0)
         {
-            if(right_operand->val != -inf)
-            {
-                val = right_operand->val;
-            }
+            hidden_depth = adds - min(right_operand->removes, adds);
+        }
+        else
+        {
+            hidden_depth = right_operand->hidden_depth+adds;
+        }
+        first_drop = min(first_drop, (prefix-right_operand->removes)+inf*(right_operand->removes == 0));
+        last_inc = max(last_inc, (prefix+right_operand->adds)-inf*(right_operand->adds == 0));
+        removes = removes + max(0, right_operand->removes-adds);
+        adds = max(0, adds-right_operand->removes) + right_operand->adds;
+        //prefix_check(right_operand);
+        prefix=right_operand->prefix;
+        sum+=right_operand->sum;
+        if(right_operand->val != -inf)
+        {
+            val = right_operand->val;
         }
     }
-    void overfill(one_side *other_side)
+    void prefix_check(one_side *right_operand)
     {
-        //cout << "here: " <<endl;
-        //cout << print(this) << " " <<print(other_side) <<endl;
-        if(removes>0 && other_side->adds>0)
+        if(deep_print && !(right_operand->prefix+prefix_delta == prefix+right_operand->sum))
         {
-            //cout << "wrap 1" <<endl;
-            int tmp_adds = other_side->adds;
-            other_side->cut += min(other_side->adds, removes);
-            other_side->max_adds -= min(other_side->adds, removes);
-            other_side->adds = max(0, other_side->adds-removes);
-            if (max_removes<min(removes, tmp_adds)) assert(0);
-            //assert(max_removes>=delta_removes);
-            max_removes = max(0, max_removes - min(removes, tmp_adds));
-            removes = max(0, removes-tmp_adds);
+            cout << "prefix: " << right_operand->prefix <<" with "<< prefix_delta << " should be "<<  prefix <<" " << right_operand->sum <<endl;
+            assert(right_operand->prefix+prefix_delta == prefix+right_operand->sum);
         }
-        if(other_side->removes>0 && adds>0)
+    }
+    int prefix_wrap(one_side *right_operand)
+    {
+        assert(right_operand->removes>=0 && adds>=0);
+        first_drop = min(right_operand->first_drop+prefix, min(first_drop, (prefix-right_operand->removes)+inf*(right_operand->removes == 0)));
+        last_inc = max(last_inc, (prefix+right_operand->adds)-inf*(right_operand->adds == 0));
+        hidden = right_operand->hidden+ min(right_operand->removes, adds);
+        if(min(right_operand->removes, adds)>0)
         {
-            other_side->overfill(this);
-            /*
-            cout << "wrap 2" <<endl;
-            int tmp_adds = adds;
-            cut += min(adds, other_side->removes);
-            max_adds -= min(adds, other_side->removes);
-            adds = max(0, adds-other_side->removes);
-            assert(other_side->max_removes>=max(0, other_side->removes - tmp_adds));
-            other_side->max_removes -= max(0, other_side->removes - tmp_adds);
-            other_side->removes = max(0, other_side->removes - tmp_adds);*/
+            hidden_depth = adds - min(right_operand->removes, adds);
         }
-        if(removes>0 && other_side->max_adds>0)
+        else
         {
-            //cout << "wrap 3" <<endl;
-            int tmp_max_adds = other_side->max_adds;
-            other_side->cut += min(other_side->max_adds, removes);
-            other_side->max_adds = max(0, other_side->max_adds-removes);
-            other_side->removes+=min(tmp_max_adds, removes);
-            other_side->max_removes+=min(tmp_max_adds, removes);
-            //assert(max_removes>=delta_remove);
-            if (max_removes< min(removes, tmp_max_adds))assert(0);
-            max_removes = max(0, max_removes - min(removes, tmp_max_adds));
-            removes = max(0, removes-tmp_max_adds);
+            hidden_depth = right_operand->hidden_depth+adds;
         }
-        if(other_side->removes>0 && max_adds>0)
+        removes = removes + max(0, right_operand->removes-adds);
+        adds = max(0, adds-right_operand->removes) + right_operand->adds;
+        prefix_check(right_operand);
+        max_prefix = max(max_prefix, prefix+right_operand->adds);
+        min_prefix = min(min_prefix, prefix-right_operand->removes);
+        prefix=right_operand->prefix+prefix_delta;
+        sum+=right_operand->sum;
+        if(right_operand->val != -inf)
         {
-            other_side->overfill(this);
-            /*cout << "wrap 4" <<endl;
-            int tmp_max_adds = max_adds;
-            cut += min(adds, other_side->removes);
-            max_adds = max(0, max_adds-other_side->removes);
-            removes += max(0, removes - tmp_max_adds);
-            other_side->removes = max(0, removes - tmp_max_adds);*/
-        }/*
-        if(adds>0 && other_side->max_removes>0)
-        {
-            cout << "wrap 5" <<endl;
-            int tmp_max_removes = other_side->max_removes;
-            cut += min(other_side->max_removes, adds);
-            other_side->max_removes = max(0, other_side->max_removes-adds);
-            adds = max(0, adds-tmp_max_removes);
+            //val = right_operand->val;
         }
-        if(other_side->adds>0 && max_removes>0)
+        return prefix_overfill();
+    }
+    int prefix_overfill()
+    {
+        int spill = 0;
+        if(deep_print)cout << "before applying overfill to one side" <<endl << print(this) << endl;
+        if(min_prefix<0)
         {
-            cout << "wrap 6" <<endl;
-            int tmp_max_removes = max_removes;
-            other_side->cut += min(max_removes, other_side->adds);
-            max_removes = max(0, max_removes-other_side->adds);
-            other_side->adds = max(0, other_side->adds-tmp_max_removes);
-        }*/
-
+            ///  )
+            ///)( )
+            ///| ( |   |)))|)
+            ///|) (|(((|   | )
+            spill=-min_prefix;
+            prefix-=min_prefix;
+            prefix_delta-=min_prefix;
+            max_prefix-=min_prefix;
+            first_drop-=min_prefix;
+            if(first_drop == 0 && hidden == 0)
+            {
+                if(deep_print)cout <<"reset first drop" <<endl;
+                first_drop = inf;
+            }
+            else if(first_drop == 0 && hidden >= 1)
+            {
+                if(deep_print)cout << "set first drop to HD:" << hidden_depth <<endl;
+                first_drop = hidden_depth;
+            }
+            sum-=min_prefix;
+            removes+=min_prefix;
+            min_prefix = 0;
+        }
+        return spill;
+    }
+    void push_lazy(one_side *parent)
+    {
+        prefix += parent->lazy_push;
+        lazy_push+=parent->lazy_push;
+    }
+    void set_lazy(one_side *prewrap_leaf, bool do_add)
+    {
+        ///if only propagating leafs upwards
+        ///assert(abs(prewrap_leaf->sum)<=1);
+        if(do_add)
+        {
+            prefix+=prewrap_leaf->sum;
+            lazy_push+=prewrap_leaf->sum;
+        }
+        else
+        {
+            prefix-=prewrap_leaf->sum;
+            lazy_push-=prewrap_leaf->sum;
+        }
+    }
+    void set_prefix(one_side *last)
+    {
+        prefix = last->prefix;
+    }
+    one_side *insert_new_node_in_place_of_current_node_and_return_modified_current_node(one_side *new_side)
+    {
+        one_side *ret = new one_side(this);
+        ret->prefix+=new_side->sum;
+        val = new_side->val;
+        prefix -= sum;
+        prefix += new_side->sum;
+        sum = new_side->sum;
+        low = new_side->low;
+        high = new_side->high;
+        adds = new_side->adds;
+        lazy_push = new_side->lazy_push;
+        cut = new_side->cut;
+        prefix_delta = new_side->prefix_delta;
+        hidden = new_side->hidden;
+        first_drop = new_side->first_drop;
+        last_inc = new_side->last_inc;
+        hidden_depth = new_side->hidden_depth;
+        return ret;
+    }
+    void add_prefix(one_side *prev)
+    {
+        prefix+=prev->prefix;
     }
     string print(one_side *p)
     {
-        return "v=" + int_to_string(p->val) + ", [-" + int_to_string(p->removes) + ", +" +int_to_string(p->adds) + ", max=+"+int_to_string(p->max_adds) + ", min=-"+int_to_string(p->max_removes)+"]";
+        return "v="+int_to_string(p->val)+",("+
+        "(s="+int_to_string(p->sum)+","+
+        "p="+int_to_string(p->prefix)+
+        //",w="+int_to_string(p->lazy_push)+
+        "),("
+        //+"h="+int_to_string(p->high) +", l="+int_to_string(-p->low) + "),(+"
+        + int_to_string(p->adds) + ", -"+int_to_string(p->removes)+"),(drop="+int_to_string(first_drop)+",up="+int_to_string(last_inc)+"),(d="+int_to_string(p->prefix_delta)+",hid="+int_to_string(p->hidden)+")";
     }
 };
 
@@ -227,8 +345,10 @@ class element
 {
 public:
     one_side *one[2];
+    bool defined;
     void init()
     {
+        defined = true;
         one[0] = new one_side();
         one[1] = new one_side();
     }
@@ -270,14 +390,111 @@ public:
         one[0]->merge(right_operand->one[0]);
         one[1]->merge(right_operand->one[1]);
     }
-    void wrap()
+    void prefix_wrap(element *right_operand)
     {
-        one[0]->overfill(one[1]);
+        int spill[2] = {0, 0};
+        spill[0] = one[0]->prefix_wrap(right_operand->one[0]);
+        spill[1] = one[1]->prefix_wrap(right_operand->one[1]);
+        int c = 1;
+        while(c==1)
+        {
+            c = 0;
+            for(int k = 0; k<2; k++)
+            {
+                if(spill[k]>0)
+                {
+                    c++;
+                    if(deep_print)cout << "Spill at side: " << k <<" by: "<< spill[k] <<endl;
+                    if(
+                       //one[1-k]->sum<spill[k] ||
+                       //one[1-k]->high<spill[k]||
+                       one[1-k]->adds<spill[k] || one[1-k]->prefix<spill[k])
+                    {
+                        if(deep_print)
+                        {
+                            cout << "BACK SPILL: "<< spill[k] <<endl;
+                            //cout << one[1-k]->sum << " " << one[1-k]->high <<" "
+                            cout << one[1-k]->adds <<" "<< one[1-k]->prefix << endl;
+                        }
+                    }
+
+                    if(deep_print)cout << "before spill: " << print() <<endl;
+                    one[1-k]->adds=max(0, one[1-k]->adds-spill[k]);
+                    one[1-k]->prefix-=spill[k];
+                    one[1-k]->sum-=spill[k];
+                    one[1-k]->prefix_delta-=spill[k];
+                    one[1-k]->first_drop -= spill[k];
+                    one[1-k]->last_inc -=spill[k];
+                    one[1-k]->hidden_depth--;///IS IT?
+
+                    if(one[1-k]->first_drop<0)
+                    {
+                        one[1-k]->min_prefix -= min(one[1-k]->hidden, spill[k]);
+                        one[1-k]->removes = -one[1-k]->min_prefix;
+                        one[1-k]->hidden = max(0, one[1-k]->hidden-spill[k]);
+
+                        if(deep_print)cout << "min prefix of " << 1-k <<" is "<< one[1-k]->min_prefix <<endl;
+                    }
+
+                    if(deep_print)cout << "after spill: " << print() <<endl;
+                }
+            }
+            if(c>=2)
+            {
+                if(deep_print)
+                {
+                    cout << "NON-ROBUST double empty deque" <<endl;
+                    assert(0);
+                }
+                else
+                {
+                    //cout << "HAS TO" <<endl;
+                    //break;
+                }
+            }
+
+            spill[0] = one[0]->prefix_overfill();
+            spill[1] = one[1]->prefix_overfill();
+        }
+    }
+    void push_lazy(element *parent_lazy)
+    {
+        one[0]->push_lazy(parent_lazy->one[0]);
+        one[1]->push_lazy(parent_lazy->one[1]);
+    }
+    void clear_push()
+    {
+        one[0]->lazy_push = 0;
+        one[1]->lazy_push = 0;
+    }
+    void set_lazy(element *removed_child, bool do_add)
+    {
+        one[0]->set_lazy(removed_child->one[0], do_add);
+        one[1]->set_lazy(removed_child->one[1], do_add);
+    }
+    bool do_push()
+    {
+        return (one[0]->lazy_push!=0 || one[1]->lazy_push!=0);
     }
     int get(int side)
     {
         //assert(one[side]->val != -inf);
         return one[side]->val;
+    }
+    void set_prefix(element *last)
+    {
+        one[0]->set_prefix(last->one[0]);
+        one[1]->set_prefix(last->one[1]);
+    }
+    void add_prefix(element *prev)
+    {
+        one[0]->add_prefix(prev->one[0]);
+        one[1]->add_prefix(prev->one[1]);
+    }
+    element* insert_new_node_in_place_of_current_node_and_return_modified_current_node(element *new_data)
+    {
+        one[0] = one[0]->insert_new_node_in_place_of_current_node_and_return_modified_current_node(new_data->one[0]);
+        one[1] = one[1]->insert_new_node_in_place_of_current_node_and_return_modified_current_node(new_data->one[1]);
     }
     string print()
     {
@@ -303,7 +520,7 @@ public:
         left_bound = moment;
         right_bound = _right_bound;
         num_children = 0;
-        operation = operand;
+        operation = new element(operand);
     }
     node(int _a, int _b)
     {
@@ -311,31 +528,29 @@ public:
         b = _b;
     }
 
-    void update_bounds()
+    void push_lazy()
     {
         if(num_children>0)
         {
-            left_bound = child[0]->left_bound;
-            right_bound = child[num_children-1]->right_bound;
-        }
-    }
-    void update_operand()
-    {
-        if(num_children>0)
-        {
-            operation = new element();
-            for(int i = 0; i<num_children; i++)
+            if(operation->do_push())
             {
-                if(i!=num_children-1)
+                for(int i = 0;i<num_children;i++)
                 {
-                    child[i]->right_bound = child[i+1]->left_bound;
+                    child[i]->operation->push_lazy(operation);
+                    if(child[i]->num_children == 0)
+                    {
+                        child[i]->operation->clear_push();
+                    }
                 }
-                operation->merge(child[i]->operation);
+                operation->clear_push();
             }
-            update_bounds();
+        }
+        else
+        {
+            operation->clear_push();
         }
     }
-    node* create_leaf(int moment, int type, int val)
+    pair<node*, element*> create_leaf(int moment, int type, int val)
     {
         if(moment>=left_bound)
         {
@@ -343,50 +558,89 @@ public:
             int old_rb = right_bound;
             right_bound = min(right_bound, moment);
             node* ret_node = new node(a, b, moment, old_rb, new element(type, val));
-            return ret_node;
+            ret_node->operation->set_prefix(operation);
+            ret_node->operation->set_lazy(ret_node->operation, true);
+            ret_node->operation->clear_push();
+            return mp(ret_node, ret_node->operation);
         }
         else
         {
+            element *new_operation = operation->insert_new_node_in_place_of_current_node_and_return_modified_current_node(new element(type, val));
+            assert(operation->one[0]->cut == 0);
             node *new_node = new node(a, b, left_bound, right_bound, operation);
             right_bound = left_bound;
             left_bound = moment;
-            operation = new element(type, val);
-            return new_node;
+            operation = new_operation;
+            return mp(new_node, operation);
         }
     }
-    node* insert_node(int moment, int type, int val)
+    void update_bounds()
+    {
+        if(num_children>0)
+        {
+            left_bound = child[0]->left_bound;
+            right_bound = child[num_children-1]->right_bound;
+            operation->set_prefix(child[num_children-1]->operation);
+        }
+    }
+    element* update_operand(element *prefix)
+    {
+        if(num_children>0)
+        {
+            operation = new element(prefix);
+            for(int i = 0; i<num_children; i++)
+            {
+                if(i!=num_children-1)
+                {
+                    child[i]->right_bound = child[i+1]->left_bound;
+                }
+                if(deep_print_query)
+                {
+                    cout << "Update merge at i = " << i << " " << child[0]->left_bound <<" "<< child[num_children-1]->right_bound<< ": "<< endl<< operation->print() << " AND "<< endl << child[i]->operation->print() <<endl;
+                }
+                operation->prefix_wrap(child[i]->operation);
+            }
+            update_bounds();
+        }
+        return operation;
+    }
+    element* insert_node(int moment, element* prefix, int type, int val)
     {
         //assert(left_bound<=moment && moment<right_bound);
         node* new_node = NULL;
-        bool do_break = false;
-        for(int i = 0; i<num_children&&!do_break; i++)
+        element* prefix_to_right_leaf = NULL;
+        for(int i = 0; i<num_children; i++)
         {
             bool is_smallest = (i == 0 && moment < left_bound);
             if(is_smallest || (child[i]->left_bound <=moment && moment < child[i]->right_bound))
             {
-                new_node = child[i]->insert(moment, type, val);
+                pair<node*, element*> delta_tree = child[i]->insert(moment, prefix, type, val);
+                new_node =  delta_tree.f;
+                prefix_to_right_leaf = delta_tree.s;
+                for(int j = i+1;j<num_children;j++)
+                {
+                    element *tmp_leaf_node = new element(prefix_to_right_leaf);
+                    prefix_to_right_leaf->prefix_wrap(child[j]->operation);
+                    child[j]->operation->set_lazy(tmp_leaf_node, true);
+                }
                 if(new_node != NULL)
                 {
                     for(int j = num_children; j>i; j--)
                     {
                         child[j+1] = child[j];
                     }
-                    int new_child_at = i+1;
-                    child[new_child_at] = new_node;
+                    child[i+1] = new_node;
                     num_children++;
                 }
-                else
-                {
-                    return NULL;
-                }
-                do_break = true;
+                break;
             }
         }
-        return new_node;
+        return prefix_to_right_leaf;
     }
-    node* split_node()
+    pair<node*, element*> split_node(element *prefix)
     {
         node* ret_node = NULL;
+        element* full_prefix = NULL;
         if(num_children == b+1)
         {
             ret_node = new node(a, b);
@@ -399,41 +653,56 @@ public:
                 ret_node->num_children++;
             }
             assert(ret_node->num_children == aug_num_c);
-            update_operand();
-            ret_node->update_operand();
+            if(deep_print)cout << "new left operand:" <<endl;
+            element *next_prefix = update_operand(prefix);
+            if(deep_print)cout << "new right operand:" <<endl;
+            full_prefix = ret_node->update_operand(next_prefix);
         }
         else
         {
-            update_operand();
+            full_prefix = update_operand(prefix);
         }
-        return ret_node;
+        return mp(ret_node, full_prefix);
     }
-    node* insert(int moment, int type, int val)
+    pair<node*, element*> insert(int moment, element* prefix, int type, int val)
     {
+        push_lazy();
         if(num_children == 0)
         {
             return create_leaf(moment, type, val);
         }
-        insert_node(moment, type, val);
-        node* ret_node = split_node();
-        return ret_node;
+        element* prefix_to_right_of_leaf = insert_node(moment, prefix, type, val);
+        return split_node(prefix);
     }
-    bool delete_at(int moment)
+    pair<bool, element*> delete_at(int moment, element* prefix)
     {
+        assert(0);
         assert(left_bound<=moment && moment<right_bound);
         if(num_children == 0)
         {
-            return true;
+            return mp(true, operation);
         }
+        push_lazy();
+        pair<bool, element*> delta_tree = mp(false, new element());
+        element* removed_leaf = NULL;
         for(int i = 0; i<num_children; i++)
         {
             if(child[i]->left_bound<=moment && moment<child[i]->right_bound)
             {
-                if(child[i]->delete_at(moment))
+                delta_tree = child[i]->delete_at(moment);
+                bool tree_change = delta_tree.f;
+                removed_leaf = delta_tree.s;
+                for(int j = i+1;j<num_children;j++)
+                {
+                    child[j]->operation->set_lazy(removed_leaf, false);
+                    //child[j]->push_lazy();
+                }
+                if(tree_change)
                 {
                     update_bounds();
                     if(i!=num_children-1)
                     {
+
                         int add = 1;
                         if(child[i]->num_children == 0)
                         {
@@ -485,14 +754,14 @@ public:
                 break;
             }
         }
-        update_operand();
+        update_operand(prefix);
         if(num_children<a)
         {
-            return true;
+            return mp(true, removed_leaf);
         }
         else
         {
-            return false;
+            return mp(false, removed_leaf);
         }
     }
     element *delta_query(int moment)
@@ -501,6 +770,7 @@ public:
         {
             return new element();
         }
+        push_lazy();
         if(num_children == 0)
         {
             return operation;
@@ -510,11 +780,21 @@ public:
         {
             if(child[i]->left_bound<=moment && moment<child[i]->right_bound)
             {
-                ret->merge(child[i]->delta_query(moment));
+                element* partial_node = child[i]->delta_query(moment);
+                if(deep_print_query)
+                {
+                    cout << "delta query merge end: " <<endl << ret->print() << " AND "<<endl<< partial_node->print() <<endl;
+                }
+                ret->merge(partial_node);
                 break;
             }
             else
             {
+
+                if(deep_print_query)
+                {
+                    cout << "delta querry merge mid: " << ret->print() << " AND "<< endl<< child[i]->operation->print() <<endl;
+                }
                 ret->merge(child[i]->operation);
             }
         }
@@ -533,8 +813,12 @@ public:
         }
         if(num_children == 0)
         {
-            ret->merge(operation);
-            ret->wrap();
+            if(deep_print)
+            {
+                cout << "wrap at leaf: " << endl << ret->print() << endl << operation->print() <<endl <<endl;
+            }
+            ret->prefix_wrap(operation);
+            ///ret->wrap(operation);
             if(deep_print)
             {
                 cout << "leaf:" <<endl;
@@ -542,30 +826,33 @@ public:
             }
             return ret;
         }
+        push_lazy();
         for(int i = 0; i<num_children; i++)
         {
             if(child[i]->left_bound<=moment && moment<child[i]->right_bound)
             {
                 if(deep_print)
                 {
-                    cout << "Walk to child at i = " << i << "(prewalk state:)"<<endl;
+                    cout << "Walk query to child at i = " << i << "(prewalk state:)"<<endl;
                     print_e(ret);
                 }
-                ret = new element(child[i]->wrap_query(ret, moment));
+
+                ret = child[i]->wrap_query(ret, moment);
+                //ret = new element(child[i]->wrap_query(ret, moment));
                 break;
             }
             else
             {
-                ret->merge(child[i]->operation);
                 if(deep_print)
                 {
-                    cout <<"after merge with i = " <<i <<endl;
-                    print_e(ret);
+                    cout << "query wrap at i = " << i << endl << ret->print() << endl << child[i]->operation->print() <<endl <<endl;
                 }
-                ret->wrap();
+
+                ret->prefix_wrap(child[i]->operation);
+                //ret->wrap(child[i]->operation);
                 if(deep_print)
                 {
-                    cout << "after wrap with i = "<<i <<endl;
+                    cout << "after query wrap with i = "<<i <<endl;
                     print_e(ret);
                 }
             }
@@ -585,6 +872,8 @@ public:
             assert(right_node->num_children == 0);
             return NULL;
         }
+        push_lazy();
+        right_node->push_lazy();
         assert(right_node->left_bound == right_bound);
         for(int i = num_children, j = 0; j<right_node->num_children; j++, i++)
         {
@@ -609,12 +898,27 @@ public:
 
     int query_value_at_order(int moment, element *cumulative, int order, int cut, int side)
     {
-        //cout << "order: "<< order << " + "<< cut << " at: "<< endl;print_e(cumulative);
+        if(deep_print)
+        {
+            cout << "order: "<< order << " + "<< cut << " at: "<< endl;
+            print_e(cumulative);
+        }
         if(num_children == 0)
         {
-            cumulative->merge(operation);
-            cumulative->wrap();
-            if(cumulative->one[side]->adds+cumulative->one[side]->cut == order + cut)
+            if(deep_print)
+            {
+                cout << "order wrap at leaf" << endl << cumulative->print() << endl << operation->print() <<endl <<endl;
+            }
+            cumulative->prefix_wrap(operation);
+            int at_order = cumulative->one[side]->prefix-cumulative->one[side]->prefix_delta;
+            if(deep_print)
+            {
+                cout << "after order wrap at leaf: " << cumulative->print() <<endl;
+                cout << "leaf at order: " << at_order <<endl;
+            }
+            //cumulative->wrap(operation);
+            //int at_order = cumulative->one[side]->adds + cumulative->one[side]->cut;
+            if(at_order == order + cut)
             {
                 return operation->get(side);
             }
@@ -623,40 +927,53 @@ public:
                 return -inf;
             }
         }
+        push_lazy();
         element *up_to_next_query = new element(cumulative);
         int query_at = 0;
         for(int i = 0; i<num_children && child[i]->left_bound<=moment; i++)
         {
+            //cout << i <<endl;
             element *child_operation = child[i]->operation;
             if(child[i]->right_bound>moment)
             {
+                if(deep_print)cout << "query partial child at i = " << i <<endl;
                 child_operation = child[i]->delta_query(moment);
+                if(deep_print)cout << "back from partial query at i = " << i << " result: " <<endl << child_operation->print() <<endl;;
+                //child_operation->add_prefix(cumulative);
+                child_operation->clear_push();
+                if(deep_print)cout << child_operation->print() <<endl << "test low high is next" <<endl;
                 //cout << "child " << i << endl;
                 //print_e(child_operation);
             }
-            int low_order = cumulative->one[side]->adds-child_operation->one[side]->removes+cumulative->one[side]->cut;
-            int high_order = cumulative->one[side]->adds+child_operation->one[side]->adds+cumulative->one[side]->cut;
+            //int low_order = cumulative->one[side]->sum+child_operation->one[side]->low  +cumulative->one[side]->cut -  min(0, cumulative->one[side]->sum - child_operation->one[side]->removes);
+            //int high_order = cumulative->one[side]->sum+child_operation->one[side]->high  +cumulative->one[side]->cut - min(0, cumulative->one[side]->sum - child_operation->one[side]->removes);
+            int low_order = cumulative->one[side]->prefix-child_operation->one[side]->removes - cumulative->one[side]->prefix_delta;
+            int high_order = cumulative->one[side]->prefix+child_operation->one[side]->adds - cumulative->one[side]->prefix_delta;
+            if(deep_print)
+            {
+                cout << "i = " << i << ", low high: "<< low_order <<" "<< high_order <<endl;
+            }
             if(low_order<order+cut && order+cut<=high_order)
             {
                 up_to_next_query = new element(cumulative);
                 query_at = i;
+                if(deep_print)cout << "take" <<endl;
             }
-            cumulative->merge(child_operation);
+
             if(deep_print)
             {
-
-                cout << "cumulative at i = " << i <<endl;
-                cout << "after merge: "<<endl;
-                print_e(cumulative);
+                cout << "order wrap at i = " << i << endl << cumulative->print() << endl << child_operation->print() <<endl;
             }
-            cumulative->wrap();
+            cumulative->prefix_wrap(child_operation);
+            //cumulative->wrap(child_operation);
             if(deep_print)
             {
                 cout << "after wrap" <<endl;
                 print_e(cumulative);
+                cout << endl;
             }
         }
-        //cout << "expand at: "  << query_at <<endl;
+        if(deep_print)cout << "expand at: "  << query_at <<endl;
         return child[query_at]->query_value_at_order(moment, up_to_next_query, order, cut, side);
     }
     string print_rb()
@@ -672,7 +989,7 @@ public:
         if(num_children > 0)
         {
             for(int i = 0; i<c; i++) cout << " ";
-            cout << "num_children = " << num_children << " :: ";
+            //cout << "num_children = " << num_children << " :: ";
         }
         cout << endl;
         for(int i = 0; i<num_children; i++)
@@ -711,11 +1028,11 @@ public:
         {
             //cout << "new root!" <<endl;
             root = new node(a, b, moment, inf, new element(type, val));
-            root->update_bounds();
+            //root->update_bounds();
         }
         else
         {
-            node* augment_node = root->insert(moment, type, val);
+            node* augment_node = root->insert(moment, type, val).f;
             if(augment_node != NULL)
             {
                 //cout << "new root!" <<endl;
@@ -787,21 +1104,22 @@ public:
         }
         if(print_queries)
         {
-            cout << "ORDER COUNT" <<endl;retro_deque->print_e(find_order);
+            cout << "ORDER COUNT" <<endl;
+            retro_deque->print_e(find_order);
         }
-        if(find_order->one[side]->adds>=1)
+        int order = find_order->one[side]->prefix;
+        if(order>=1)
         {
-            return retro_deque->query_value_at_order(moment, new element(), find_order->one[side]->adds, find_order->one[side]->cut, side);
+            return retro_deque->query_value_at_order(moment, new element(), order, -find_order->one[side]->prefix_delta, side);
         }
         else
         {
             if(print_queries) cout << "SHIFT" <<endl;
-            if(find_order->one[1-side]->adds<find_order->one[side]->removes)
+            if(find_order->one[1-side]->prefix<1)
             {
-                //assert(0);
                 return -inf;
             }
-            return retro_deque->query_value_at_order(moment, new element(), 1, find_order->one[1-side]->cut+find_order->one[1-side]->removes+find_order->one[side]->removes, 1-side);
+            return retro_deque->query_value_at_order(moment, new element(), 1, -find_order->one[1-side]->prefix_delta, 1-side);
         }
     }
     void delete_at(int moment)
@@ -884,6 +1202,7 @@ int work_a_b_tree()
 
 vector<int> oracle;
 bool time_line[max_time+1];
+bool constant[max_n+1];
 class test
 {
 public:
@@ -894,12 +1213,13 @@ public:
         out.clear();
         oracle.clear();
         MEM(time_line, 0);
+        MEM(constant, 0);
         int q_size = 0;
         if(print_input)cout << n <<endl;
         for(int i = 0; i<n; i++)
         {
             int t, type, val;
-            if(i < n/50)
+            if(i < -n/20)
             {
                 t = i+1;
                 time_line[t] = 1;
@@ -916,8 +1236,13 @@ public:
                     t++;
                 }
                 time_line[t] = 1;
-                type = rand(0, 6);
-                val = rand(1, max_constant);
+                type = rand(0, 5);
+                val = rand(0, max_constant);
+                while(constant[val] == 1)
+                {
+                    val+=rand(0, max_constant);
+                    val%=(max_constant+1);
+                }
             }
             q_size+=(type == 1 || type == 3);
             q_size-=(type == 0 || type == 2);
@@ -934,7 +1259,9 @@ public:
             in.pb(mp(mp(t, type), val));
             if(print_input)
             {
-                cout << t <<" "<< type;if(type == 1 || type == 3)cout<< " "<< val;cout <<endl;
+                cout << t <<" "<< type;
+                if(type == 1 || type == 3)cout<< " "<< val;
+                cout <<endl;
             }
         }
         vector<pair<pair<int, int>, int> > partial;
@@ -990,6 +1317,7 @@ public:
                 }
                 else
                 {
+                    illegal = true;
                     oracle.pb(-inf);
                 }
             }
@@ -1054,11 +1382,13 @@ public:
 
 int main()
 {
+    if(random_seed)srand (time(NULL));
     int T = NUM_TESTS;
     int n = max_n;
     if(!AUTO_TEST) T = 1;
     double correct = 0;
     double total = 0;
+    int illegal = 0;
     while(T--)
     {
         test *test_case;
@@ -1068,11 +1398,19 @@ int main()
         {
             string rez = test_case->check();
             correct+=(rez == "OK");
-            total+=(rez != "ILLEGAL");
-            cout << total << " :: "<< rez <<endl;
-            if(print_wrong_input)cout << "-------------------------------"<<endl;
+            if(rez != "ILLEGAL")
+            {
+                total++;
+                cout << total << " :: "<< rez <<endl;
+                if(print_wrong_input)cout << "-------------------------------"<<endl;
+            }
+            else
+            {
+                illegal++;
+            }
         }
     }
+    cout << "skiped: " << illegal <<" out of " << total+illegal <<endl;
     cout <<"correct: "<< correct <<"/"<<total << " :: "<< 100.0*((double)correct/total)<<endl;
     return 0;
 }
