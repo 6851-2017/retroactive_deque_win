@@ -463,60 +463,6 @@ public:
     {
         cout << ret->print() << endl;
     }
-    element *wrap_query(element *ret, int moment)
-    {
-        //cout << "wrap: " <<endl;print_e(ret);
-        if(moment<left_bound)
-        {
-            return ret;
-        }
-        if(num_children == 0)
-        {
-            if(deep_print)
-            {
-                cout << "preprint:" <<endl;
-                print_e(ret);
-                cout << "merge with:" << endl;
-                cout << operation->print() <<endl;
-            }
-            ret->merge(operation);
-            if(deep_print)
-            {
-                cout <<"at "<< left_bound <<" "<< right_bound <<  "leaf:" <<endl;
-                print_e(ret);
-            }
-            return ret;
-        }
-        for(int i = 0; i<num_children; i++)
-        {
-            if(child[i]->left_bound<=moment && moment<child[i]->right_bound)
-            {
-                if(deep_print)
-                {
-                    cout <<"at "<< left_bound <<" "<< right_bound << "Walk to child at i = " << i << "(prewalk state:)"<<endl;
-                    print_e(ret);
-                }
-                ret = child[i]->wrap_query(ret, moment);
-                break;
-            }
-            else
-            {
-                ret->merge(child[i]->operation);
-                if(deep_print)
-                {
-                    cout <<"at "<< left_bound <<" "<< right_bound << " after merge with i = " <<i <<endl;
-                    print_e(ret);
-                }
-            }
-        }
-        if(deep_print)
-        {
-            cout <<"return to parent: "<<endl;
-            print_e(ret);
-        }
-
-        return ret;
-    }
     node* combine(node *right_node)
     {
         if(num_children == 0)
@@ -645,11 +591,10 @@ public:
         {
             return new element();
         }
-        return root->wrap_query(new element(), moment);
+        return root->delta_query(moment);
     }
     int query_value_at_order(int moment, element* cumulative, int order, int side)
     {
-        root->delta_query(moment);
         return root->query_value_at_order(moment, cumulative, order, side);
     }
     void insert(int moment, int type, int val)
@@ -727,18 +672,7 @@ public:
     }
     int query(int moment, int side)
     {
-        element* find_order = retro_deque->query(moment);
-        if(find_order->get(side) == -inf && find_order->get(1-side) == -inf)
-        {
-            return -inf;
-        }
-        if(print_queries)
-        {
-            cout << "ORDER COUNT" <<endl;retro_deque->print_e(find_order);
-        }
-        int order = find_order->get_prefix(side);
-        if(print_queries)cout << "Find Order = " << order << endl;
-        return retro_deque->query_value_at_order(moment, new element(), order,  side);
+        return retro_deque->query_value_at_order(moment, new element(), retro_deque->query(moment)->get_prefix(side), side);
     }
     void delete_at(int moment)
     {
