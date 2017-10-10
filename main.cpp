@@ -433,6 +433,7 @@ public:
             return false;
         }
     }
+    element *partial_operation;
     element *delta_query(int moment)
     {
         if(moment<left_bound)
@@ -441,7 +442,7 @@ public:
         }
         if(num_children == 0)
         {
-            return operation;
+            return partial_operation = operation;
         }
         element* ret = new element();
         for(int i = 0; i<num_children; i++)
@@ -456,7 +457,7 @@ public:
                 ret->merge(child[i]->operation);
             }
         }
-        return ret;
+        return partial_operation = ret;
     }
     void print_e(element *ret)
     {
@@ -573,8 +574,9 @@ public:
             element *child_operation = child[i]->operation;
             if(child[i]->right_bound>moment)
             {
-                child_operation = child[i]->delta_query(moment);
-            }for(int side_i = 0; side_i<2;side_i++)
+                child_operation = child[i]->partial_operation;//delta_query(moment);
+            }
+            for(int side_i = 0; side_i<2;side_i++)
             {
                 int low_order = cumulative->get_prefix(side_i)-child_operation->one[side_i]->removes;
                 int high_order = cumulative->get_prefix(side_i)+child_operation->one[side_i]->adds;
@@ -647,6 +649,7 @@ public:
     }
     int query_value_at_order(int moment, element* cumulative, int order, int side)
     {
+        root->delta_query(moment);
         return root->query_value_at_order(moment, cumulative, order, side);
     }
     void insert(int moment, int type, int val)
